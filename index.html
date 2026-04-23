@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="zh-HK">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>HK Fung Shui Map Tool</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        body, html { margin: 0; padding: 0; height: 100%; overflow: hidden; font-family: -apple-system, sans-serif; background: #f0f0f0; }
+        #map { width: 100%; height: 100vh; z-index: 1; }
+
+        /* The Tool Wrapper */
+        #fs-tool {
+            position: absolute;
+            display: none;
+            pointer-events: none;
+            z-index: 1000;
+            transform: translate(-50%, -50%);
+        }
+
+        /* Fixed 24-Mountain Compass */
+        #chinese-compass {
+            position: absolute;
+            width: 320px;
+            height: 320px;
+            top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 1002;
+        }
+
+        /* Rotatable Red Cross */
+        #red-cross {
+            position: absolute;
+            width: 500px; /* Long lines to cross markings */
+            height: 500px;
+            top: 50%; left: 50%;
+            transform: translate(-50%, -50%) rotate(0deg);
+            z-index: 1001;
+        }
+
+        .cross-line { position: absolute; background: rgba(255, 0, 0, 0.8); }
+        .v-line { width: 2px; height: 100%; left: 50%; top: 0; transform: translateX(-50%); }
+        .h-line { width: 100%; height: 2px; top: 50%; left: 0; transform: translateY(-50%); }
+
+        /* Mobile Controls */
+        #ui-panel {
+            position: absolute;
+            bottom: 25px; left: 50%;
+            transform: translateX(-50%);
+            width: 85%;
+            background: rgba(255, 255, 255, 0.95);
+            padding: 15px;
+            border-radius: 20px;
+            z-index: 2000;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.2);
+            text-align: center;
+        }
+
+        input[type=range] { width: 100%; height: 30px; margin: 10px 0; accent-color: #d9534f; }
+        .info { font-size: 14px; font-weight: bold; color: #333; margin-bottom: 5px; }
+    </style>
+</head>
+<body>
+
+<div id="map"></div>
+
+<div id="ui-panel">
+    <div class="info">Double-Tap map to set center</div>
+    <input type="range" id="rotate-slider" min="0" max="360" value="0">
+    <div class="info">Rotation: <span id="angle-display">0</span>°</div>
+</div>
+
+<div id="fs-tool">
+    <div id="red-cross">
+        <div class="cross-line v-line"></div>
+        <div class="cross-line h-line"></div>
+    </div>
+    <svg id="chinese-compass" viewBox="0 0 200 200">
+        <circle cx="100" cy="100" r="98" fill="rgba(255,255,255,0.4)" stroke="#000" stroke-width="0.5"/>
+        <g id="mountain-labels"></g>
+    </svg>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+    // Validated 2026 Government Map API (Topographic/Centamap Style)
+    const topoUrl = 'https://mapapi.geodata.gov.hk/gs/api/v1.0.0/xyz/basemap/wgs84/{z}/{x}/{y}.png';
+    const labelUrl = 'https://mapapi.geodata.gov.hk/gs/api/v1.0.0/xyz/label/hk/tc/wgs84/{z}/{x}/{y}.png';
+
+    const map = L.map('map', { 
+        doubleClickZoom: false, // Required for custom dblclick logic
+        zoomControl: false,
+        attributionControl: false 
+    }).setView([22.2850, 114.1722], 18);
+
+    L.tileLayer(topoUrl, { maxZoom: 20 }).addTo(map);
+    L.tileLayer(labelUrl, { maxZoom: 20 }).addTo(map);
+
+    const tool = document.getElementById('fs-tool');
+    const redCross = document.getElementById('red-cross');
+    const slider = document.getElementById('rotate-slider');
+    const angleDisplay = document.getElementById('angle-display');
+    const labelsG = document.getElementById('mountain-labels');
+
+    // Generate the 24 Mountains (子 at 0 degrees/North)
+    const mtns = ["子","癸","丑","艮","寅","甲","卯","乙","辰","巽","巳","丙","午","丁","未","坤","申","庚","酉","辛","戌","乾","亥","壬"];
+    mtns.forEach((name, i) => {
+        const deg = i * 15;
+        const rad = (deg - 90) * (Math.PI / 180);
+        const x = 100 + 85 * Math.cos(rad);
+        const y = 100 + 85 * Math.sin(rad);
+        
+        // Direction Labels
+        let txt = document.createElementNS("http://www.w3.org/2000/svg", "text");
+        txt.setAttribute("x", x); txt.setAttribute("y", y);
+        txt.setAttribute("fill", i % 6 === 0 ? "red" : "#000"); // Highlight Cardinal points
+        txt.setAttribute("font-size", "9");
+        txt.setAttribute("font-weight", "bold");
+        txt.setAttribute("text-anchor", "middle");
+        txt.setAttribute("alignment-baseline", "middle");
+        txt.setAttribute("transform", `rotate(${deg}, ${x}, ${y})`);
+        txt.textContent = name;
+        labelsG.appendChild(txt);
+
+        // Tick Marks
+        let line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+        line.setAttribute("x1", 100 + 75 * Math.cos(rad));
+        line.setAttribute("y1", 100 + 75 * Math.sin(rad));
+        line.setAttribute("x2", 100 + 98 * Math.cos(rad));
+        line.setAttribute("y2", 100 + 98 * Math.sin(rad));
+        line.setAttribute("stroke", "#333");
+        line.setAttribute("stroke-width", "0.5");
+        labelsG.appendChild(line);
+    });
+
+    let activeLatLng = null;
+
+    // Handle Setting the Tool Center
+    map.on('dblclick', (e) => {
+        activeLatLng = e.latlng;
+        tool.style.display = 'block';
+        repositionTool();
+    });
+
+    // Keep tool synced with map movement
+    function repositionTool() {
+        if (!activeLatLng) return;
+        const screenPoint = map.latLngToContainerPoint(activeLatLng);
+        tool.style.left = screenPoint.x + 'px';
+        tool.style.top = screenPoint.y + 'px';
+    }
+
+    map.on('move', repositionTool);
+    map.on('zoom', repositionTool);
+
+    // Rotation Control
+    slider.addEventListener('input', (e) => {
+        const val = e.target.value;
+        angleDisplay.innerText = val;
+        redCross.style.transform = `translate(-50%, -50%) rotate(${val}deg)`;
+    });
+</script>
+</body>
+</html>
