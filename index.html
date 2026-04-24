@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="zh-HK">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>韻韻羅庚地圖</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        body, html { margin: 0; padding: 0; height: 100%; overflow: hidden; font-family: -apple-system, sans-serif; background: #f0f0f0; touch-action: none; }
+        #map { width: 100%; height: 100vh; z-index: 1; }
+
+        /* 搜尋介面 */
+        #search-box {
+            position: absolute; top: 15px; left: 15px; z-index: 2000;
+            display: flex; background: white; padding: 5px; border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1); width: 280px;
+        }
+        #search-input { border: none; padding: 10px; flex-grow: 1; outline: none; font-size: 16px; border-radius: 8px; }
+        #search-btn { background: #007aff; color: white; border: none; padding: 0 15px; cursor: pointer; border-radius: 8px; font-weight: bold; }
+
+        /* 羅庚組件 */
+        #fs-tool { position: absolute; display: none; pointer-events: none; z-index: 1000; transform: translate(-50%, -50%); will-change: transform; }
+        
+        /* 透明度設定：移動時 25%，鎖定後 50% */
+        #chinese-compass { 
+            position: absolute; width: 320px; height: 320px; 
+            top: 50%; left: 50%; transform: translate(-50%, -50%); 
+            z-index: 1002; 
+            opacity: 0.25; 
+            transition: opacity 0.3s ease;
+        }
+        .locked #chinese-compass { opacity: 0.50; }
+
+        #red-cross { position: absolute; width: 4000px; height: 4000px; top: 50%; left: 50%; transform: translate(-50%, -50%) rotate(0deg); z-index: 1001; }
+        .cross-line { position: absolute; background: rgba(255, 0, 0, 0.6); }
+        .v-line { width: 1.2px; height: 100%; left: 50%; top: 0; transform: translateX(-50%); }
+        .h-line { width: 100%; height: 1.2px; top: 50%; left: 0; transform: translateY(-50%); }
+
+        /* 180度弧形調節條 */
+        #arc-container {
+            position: absolute; width: 340px; height: 120px;
+            bottom: -80px; left: 50%; transform: translateX(-50%);
+            display: none; pointer-events: auto; z-index: 1005;
+            text-align: center;
+        }
+        input[type=range].arc-slider {
+            width: 100%; height: 40px; background: transparent; -webkit-appearance: none;
+            cursor: pointer; accent-color: #007aff; touch-action: auto;
+        }
+
+        #remove-btn {
+            position: absolute; top: -170px; right: -170px; width: 40px; height: 40px;
+            background: #ff3b30; color: white; border-radius: 50%; display: flex;
+            align-items: center; justify-content: center; font-weight: bold;
+            cursor: pointer; pointer-events: auto; z-index: 1006; border: 3px solid white;
+        }
+
+        #add-btn {
+            position: absolute; bottom: 30px; left: 20px; z-index: 2001;
+            padding: 15px 30px; background: #333; color: white; border-radius: 50px;
+            font-weight: bold; box-shadow: 0 4px 12px rgba(0,0,0,0.3); cursor: pointer;
+        }
+        
+        #angle-display {
+            display: inline-block; background: #007aff; color: white;
+            padding: 6px 20px; border-radius: 20px; font-weight: bold;
+            margin-top: 5px; font-size: 18px;
+        }
+    </style>
+</head>
+<body>
+
+<div id="search-box">
+    <input type="text" id="search-input" placeholder="輸入搜尋位置 (例如: 太古城)...">
+    <button id="search-btn">搜尋</button>
+</div>
+
+<button id="add-btn">+ 羅庚</button>
+
+<div id="map"></div>
+
+<div id="fs-tool">
+    <div id="remove-btn" onclick="closeTool(event)">✕</div>
+    
+    <div id="red-cross">
+        <div class="cross-line v-line"></div>
+        <div class="cross-line h-line"></div>
+    </div>
+
+    <svg id="chinese-compass" viewBox="0 0 200 200">
+        <circle cx="100" cy="100" r="98" fill="rgba(255,255,255,0.2)" stroke="#333" stroke-width="0.2"/>
+        <g id="markings"></g>
+    </svg>
+
+    <div id="arc-container">
+        <input type="range" id="rotate-slider" class="arc-slider" min="-90" max="90" value="0">
+        <div id="angle-display">校正角度: <span id="angle-val">0</span>°</div>
+    </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+    const map = L.map('map', { 
+        zoomControl: false, 
+        maxZoom: 22, 
+        zoomSnap: 0.1,
+        tap: false 
+    }).setView([22.2850, 114.1722], 18);
+
+    // 使用穩定、無需 API Key 的圖層
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+        maxNativeZoom: 19, maxZoom: 22
+    }).addTo(map);
+
+    const tool = document.getElementById('fs-tool');
+    const redCross = document.getElementById('red-cross');
+    const slider = document.getElementById('rotate-slider');
+    const angleVal = document.getElementById('angle-val');
+    const arcContainer = document.getElementById('arc-container');
+    const addBtn = document.getElementById('add-btn');
+    const markings = document.getElementById('markings');
+
+    // 二十四山邏輯
+    const mtns = ["子","癸","丑","艮","寅","甲","卯","乙","辰","巽","巳","丙","午","丁","未","坤","申","庚","酉","辛","戌","乾","亥","壬"];
+    mtns.forEach((name, i) => {
+        const deg = i * 15;
+        const rad = (deg - 90) * (Math.PI / 180);
+        const x = 100 + 85 * Math.cos(rad);
+        const y = 100 + 85 * Math.sin(rad);
+        let txt = document.createElementNS("http://www.w3.org/2000/svg", "text");
+        txt.setAttribute("x", x); txt.setAttribute("y", y);
+        txt.setAttribute("fill", i % 3 === 0 ? "#e63946" : "#111");
+        txt.setAttribute("font-size", "9.5"); txt.setAttribute("font-weight", "700");
+        txt.setAttribute("text-anchor", "middle"); txt.setAttribute("alignment-baseline", "middle");
+        txt.setAttribute("transform", `rotate(${deg}, ${x}, ${y})`);
+        txt.textContent = name;
+        markings.appendChild(txt);
+    });
+
+    let activeLatLng = null;
+    let isPlacing = false;
+
+    function startPlacing(latlng) {
+        isPlacing = true;
+        tool.classList.remove('locked');
+        tool.style.display = 'block';
+        arcContainer.style.display = 'none';
+        activeLatLng = latlng;
+        updateUI();
+    }
+
+    function closeTool(e) {
+        if(e) e.stopPropagation();
+        tool.style.display = 'none';
+        isPlacing = false;
+    }
+
+    addBtn.onclick = () => startPlacing(map.getCenter());
+
+    // 滑鼠與觸控移動邏輯
+    map.on('mousemove', (e) => {
+        if (!isPlacing) return;
+        activeLatLng = e.latlng;
+        updateUI();
+    });
+
+    map.on('touchmove', (e) => {
+        if (isPlacing) {
+            L.DomEvent.stop(e); 
+            const touch = e.originalEvent.touches[0];
+            activeLatLng = map.mouseEventToLatLng(touch);
+            updateUI();
+        }
+    });
+
+    // 點擊/輕按鎖定
+    map.on('click', () => {
+        if (isPlacing) {
+            isPlacing = false;
+            tool.classList.add('locked');
+            arcContainer.style.display = 'block';
+        }
+    });
+
+    function updateUI() {
+        if (!activeLatLng) return;
+        const p = map.latLngToContainerPoint(activeLatLng);
+        tool.style.left = p.x + 'px';
+        tool.style.top = p.y + 'px';
+    }
+
+    map.on('move zoom', updateUI);
+
+    // 180度校正
+    slider.oninput = (e) => {
+        const val = e.target.value;
+        angleVal.innerText = val;
+        redCross.style.transform = `translate(-50%, -50%) rotate(${val}deg)`;
+    };
+
+    // 搜尋後自動置中並附著羅庚
+    async function search() {
+        const val = document.getElementById('search-input').value;
+        if (!val) return;
+        try {
+            const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(val + ", Hong Kong")}`);
+            const data = await res.json();
+            if (data && data.length > 0) {
+                const target = L.latLng(data[0].lat, data[0].lon);
+                map.setView(target, 21);
+                setTimeout(() => startPlacing(target), 500);
+            }
+        } catch (e) {}
+    }
+
+    document.getElementById('search-btn').onclick = search;
+    document.getElementById('search-input').onkeypress = (e) => { if(e.key==='Enter') search(); };
+</script>
+</body>
+</html>
