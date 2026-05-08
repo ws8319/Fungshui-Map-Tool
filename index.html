@@ -3,10 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <title>韻韻羅庚</title>
+    <title>韻韻羅庚 · 二十四山納氣顯曜</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <style>
-        /* ----- 韻韻羅庚 最終版 (納氣標籤可見，無過度發光) ----- */
+        /* ----- 韻韻羅庚 最終典藏版 (納氣雙顯·古法清晰) ----- */
         body, html { margin: 0; padding: 0; height: 100%; overflow: hidden; font-family: -apple-system, sans-serif; background: #f0f0f0; }
         #map { width: 100%; height: 100vh; z-index: 1; }
         
@@ -38,11 +38,11 @@
         .locked #chinese-compass { opacity: 0.96; }
 
         #red-cross { position: absolute; width: 4000px; height: 4000px; top: 0; left: 0; transform: translate(-50%, -50%) rotate(0deg); z-index: 999; pointer-events: none; }
-        .cross-line { position: absolute; background: rgba(200, 30, 30, 0.8); }  /* 紅色線條，無發光 */
-        .v-line { width: 2px; height: 100%; left: 50%; top: 0; }   /* 紅線更細 */
+        .cross-line { position: absolute; background: rgba(200, 30, 30, 0.85); }  /* 正紅古韻，無光暈 */
+        .v-line { width: 2px; height: 100%; left: 50%; top: 0; }
         .h-line { height: 2px; width: 100%; top: 50%; left: 0; }
         
-        /* 納氣標籤 — 獨立的div，跟隨旋轉，位於垂直線頂端外側 */
+        /* 納氣標籤 (紅線頂端) — 保留原風貌，與二十四山標示相呼應 */
         .naqi-label {
             position: absolute;
             left: 50%;
@@ -78,7 +78,7 @@
         }
         #direction-info span { color: #ffaa66; font-weight: 900; }
 
-        /* 底部按鈕組 — 縮小尺寸 */
+        /* 底部按鈕組 — 傳統精簡 */
         .bottom-btns {
             position: absolute;
             bottom: 20px;
@@ -110,7 +110,7 @@
         .btn-switchmap { background: #7c5e2a; }
         .btn-centamap { background: #3b7a5e; }
 
-        /* 高亮扇區：去掉過粗邊框和陰影 */
+        /* 高亮扇區 (忠實保留) */
         .hit-box { stroke: #f55 !important; stroke-width: 2.5px !important; stroke-opacity: 0.9 !important; filter: none !important; }
 
         .toast-msg {
@@ -143,7 +143,7 @@
 <div id="fs-tool">
     <div id="red-cross">
         <div class="cross-line v-line">
-            <div class="naqi-label">納氣</div>   <!-- 獨立標籤 -->
+            <div class="naqi-label">納氣</div>
         </div>
         <div class="cross-line h-line"></div>
     </div>
@@ -161,7 +161,7 @@
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
-    // ======================= 多地圖底圖 (防灰屏) =======================
+    // ======================= 多地圖底圖 (防灰屏，原版不動) =======================
     const MAP_TYPES = [
         { name: "普通地圖", url: "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png", options: { maxZoom: 22, attribution: '&copy; OSM & CartoDB' } },
         { name: "衛星影像", url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", options: { maxZoom: 19, attribution: '&copy; Esri' } },
@@ -247,6 +247,63 @@
         return mtns[idx % 24];
     }
     
+    // ========= 修復：二十四山納氣指示標記 (古法紅星，跟隨納氣跳動，不遮蓋任何元素) =========
+    let currentNaqiMarker = null;   // 保存當前納氣指示器 SVG元素
+    
+    // 在羅盤外圈（半徑100px）繪製一顆古韻紅星，精準指向當前納氣對應的二十四山
+    function drawNaqiIndicator(angleDeg) {
+        // 獲取當前納氣向首對應的山 (與下方扇區高亮完全同步)
+        const mtnName = getMountainFromAngle(angleDeg);
+        const mtnIndex = mtns.indexOf(mtnName);
+        if (mtnIndex === -1) return;
+        
+        // 該山所處的正中角度 (0° = 子，每山15度)
+        const mountainCenterAngle = mtnIndex * 15;    // 0~345度
+        // 轉換為SVG坐標: 半徑100 (介於文字92與扇區內徑108之間，完全不干擾任何文字/區塊)
+        const radiusIndicator = 100;
+        const rad = (mountainCenterAngle - 90) * Math.PI / 180;
+        const cx = 120 + radiusIndicator * Math.cos(rad);
+        const cy = 120 + radiusIndicator * Math.sin(rad);
+        
+        // 移除舊標記，避免重複
+        if (currentNaqiMarker && currentNaqiMarker.parentNode) {
+            currentNaqiMarker.parentNode.removeChild(currentNaqiMarker);
+            currentNaqiMarker = null;
+        }
+        
+        // 創建新的 SVG 標記: 採用「玲瓏赤星」樣式 (小巧醒目，不掩二十四山文字)
+        const svgNS = "http://www.w3.org/2000/svg";
+        const markerGroup = document.createElementNS(svgNS, "g");
+        // 加一個微光暈效果僅用於識別，無過度發光，完全符合古風且不遮蓋文字
+        const circle = document.createElementNS(svgNS, "circle");
+        circle.setAttribute("cx", cx);
+        circle.setAttribute("cy", cy);
+        circle.setAttribute("r", "4.2");
+        circle.setAttribute("fill", "#e34234");
+        circle.setAttribute("stroke", "#fff3c9");
+        circle.setAttribute("stroke-width", "1.2");
+        circle.setAttribute("opacity", "0.98");
+        circle.setAttribute("style", "filter: drop-shadow(0 0 1px rgba(200,0,0,0.5)); pointer-events: none;");
+        
+        // 內層小星芒（精緻感）
+        const innerDot = document.createElementNS(svgNS, "circle");
+        innerDot.setAttribute("cx", cx);
+        innerDot.setAttribute("cy", cy);
+        innerDot.setAttribute("r", "1.8");
+        innerDot.setAttribute("fill", "#ffd966");
+        innerDot.setAttribute("pointer-events", "none");
+        
+        markerGroup.appendChild(circle);
+        markerGroup.appendChild(innerDot);
+        
+        // 將標記添加到 markings 層（確保在二十四山文字之上但絕不遮擋，半徑外圈+小尺寸）
+        const markingsSvg = document.getElementById('markings');
+        if (markingsSvg) {
+            markingsSvg.appendChild(markerGroup);
+            currentNaqiMarker = markerGroup;
+        }
+    }
+    
     function updateCompassAndDirection(val) {
         document.getElementById('angle-val').innerText = val;
         document.getElementById('red-cross').style.transform = `translate(-50%, -50%) rotate(${val}deg)`;
@@ -259,6 +316,9 @@
             const hit = boxElements.find(el => n >= parseFloat(el.dataset.min) && n < parseFloat(el.dataset.max));
             if (hit) hit.classList.add('hit-box');
         });
+        
+        // ★★★ 關鍵復原：在二十四山位置增加納氣指示紅星，與下方Box納氣同步跳動 ★★★
+        drawNaqiIndicator(parseFloat(val));
     }
     
     slider.oninput = (e) => updateCompassAndDirection(e.target.value);
@@ -287,7 +347,7 @@
         boxElements.push(path);
     }
     
-    // 二十四山文字 + 半透底色（小尺寸）
+    // 二十四山文字 + 半透底色（傳統古樸）
     mtns.forEach((name, idx) => {
         let angle = idx * 15;
         let rad = (angle - 90) * Math.PI/180;
@@ -323,6 +383,8 @@
         text.textContent = name;
         markingsSvg.appendChild(text);
     });
+    
+    // 初始化羅盤方位及納氣指示器 (恢復二十四山標記)
     updateCompassAndDirection(0);
     
     // ======================= 放置羅庚 & 返回移除 =======================
@@ -350,6 +412,7 @@
         addBtn.innerHTML = '🧭 放置羅庚';
         addBtn.classList.remove('btn-backmap');
         addBtn.classList.add('btn-place');
+        // 羅盤隱藏時不必清除標記，保留下次顯示自動刷新方位即可 (乾淨)
     }
     
     function startPlaceCompass() {
@@ -386,14 +449,24 @@
             tool.classList.add('locked');
             document.getElementById('arc-container').style.display = 'block';
             updateToolPosition();
-            updateCompassAndDirection(slider.value);
+            updateCompassAndDirection(slider.value); // 刷新納氣標記及扇區
             addBtn.innerHTML = '🔙 返回';
             addBtn.classList.remove('btn-place');
             addBtn.classList.add('btn-backmap');
-            showToast("羅庚已鎖定，拖曳滑桿調整納氣方位 | 點擊「返回」可移除羅庚", 2500);
+            showToast("羅庚已鎖定，拖曳滑桿調整納氣方位 | 紅星將隨向首跳動 | 點擊「返回」移除羅庚", 2800);
         }
     });
     map.on('move zoom', () => { if(tool.style.display === 'block' && activeLatLng) updateToolPosition(); });
+    
+    // 確保每次滑桿變動都重繪二十四山指示紅星 & 調整鎖定狀態後重新校正顯示
+    const originalSliderHandler = slider.oninput;
+    slider.oninput = (e) => {
+        updateCompassAndDirection(e.target.value);
+        // 若處於鎖定狀態且羅盤顯示，保證一切同步
+        if(tool.classList.contains('locked')) {
+            // nothing else needed, drawNaqiIndicator called inside updateCompassAndDirection
+        }
+    };
     
     // ======================= 圖片底圖 (保持比例) =======================
     const fileInput = document.createElement('input');
@@ -463,10 +536,11 @@
         } catch(e) { console.warn(e); }
     };
     
+    // 額外保護：每次旋轉或鎖定後標記均正確出現，確保二十四山納氣標示清晰可見
     window.addEventListener('load', () => {
         updateCompassAndDirection(slider.value);
         tool.style.display = 'none';
-        showToast("韻韻羅庚 | 納氣標籤已修復，紅線無發光", 2800);
+        showToast("韻韻羅庚 · 二十四山納氣紅星已歸位 | 與下方納氣盤同步跳耀 | 絕不遮擋", 3200);
     });
 </script>
 </body>
