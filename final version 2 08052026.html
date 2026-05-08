@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="zh-HK">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>韻韻羅庚</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        /* ----- 韻韻羅庚 最終版 (納氣標籤可見，無過度發光) ----- */
+        body, html { margin: 0; padding: 0; height: 100%; overflow: hidden; font-family: -apple-system, sans-serif; background: #f0f0f0; }
+        #map { width: 100%; height: 100vh; z-index: 1; }
+        
+        #search-box {
+            position: absolute; top: 15px; left: 15px; z-index: 2000;
+            display: flex; background: white; padding: 5px; border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.15); width: 240px;
+        }
+        #search-input { border: none; padding: 10px; flex-grow: 1; outline: none; font-size: 14px; width: 150px; }
+        #search-btn { background: #007aff; color: white; border: none; padding: 0 12px; cursor: pointer; border-radius: 8px; font-weight: bold; }
+
+        .leaflet-control-zoom {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            top: auto;
+            left: auto;
+            z-index: 1000;
+        }
+
+        #fs-tool { position: absolute; display: none; pointer-events: none; z-index: 1000; transform: translate(-50%, -50%); }
+        
+        #chinese-compass {
+            position: absolute; top: 0; left: 0; transform: translate(-50%, -50%);
+            width: 360px; height: 360px; opacity: 0.88;
+            filter: drop-shadow(0 2px 6px rgba(0,0,0,0.2));
+            transition: opacity 0.2s;
+        }
+        .locked #chinese-compass { opacity: 0.96; }
+
+        #red-cross { position: absolute; width: 4000px; height: 4000px; top: 0; left: 0; transform: translate(-50%, -50%) rotate(0deg); z-index: 999; pointer-events: none; }
+        .cross-line { position: absolute; background: rgba(200, 30, 30, 0.8); }  /* 紅色線條，無發光 */
+        .v-line { width: 2px; height: 100%; left: 50%; top: 0; }   /* 紅線更細 */
+        .h-line { height: 2px; width: 100%; top: 50%; left: 0; }
+        
+        /* 納氣標籤 — 獨立的div，跟隨旋轉，位於垂直線頂端外側 */
+        .naqi-label {
+            position: absolute;
+            left: 50%;
+            bottom: 100%;
+            transform: translateX(-50%);
+            margin-bottom: 8px;
+            color: #cc0000;
+            font-size: 16px;
+            font-weight: 900;
+            text-shadow: 1px 1px 0 white;
+            letter-spacing: 2px;
+            background: rgba(255,255,200,0.85);
+            padding: 2px 8px;
+            border-radius: 30px;
+            white-space: nowrap;
+            pointer-events: none;
+            font-family: -apple-system, sans-serif;
+        }
+
+        #arc-container {
+            position: absolute; top: 230px; left: 0; transform: translateX(-50%);
+            width: 260px; background: rgba(0,0,0,0.8); backdrop-filter: blur(12px);
+            padding: 15px 18px; border-radius: 32px;
+            display: none; pointer-events: auto; text-align: center;
+            box-shadow: 0 12px 28px rgba(0,0,0,0.3);
+            border: 1px solid rgba(255,215,0,0.6);
+        }
+        input[type=range].arc-slider { width: 100%; height: 40px; cursor: pointer; accent-color: #ffaa33; }
+        #direction-info {
+            color: #ffdd99; font-weight: 800; font-size: 18px; margin-bottom: 10px;
+            text-shadow: 0 0 2px black;
+            letter-spacing: 1px;
+        }
+        #direction-info span { color: #ffaa66; font-weight: 900; }
+
+        /* 底部按鈕組 — 縮小尺寸 */
+        .bottom-btns {
+            position: absolute;
+            bottom: 20px;
+            left: 15px;
+            z-index: 2001;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .btn-ui {
+            padding: 8px 16px;
+            background: #1e1e2f;
+            color: white;
+            border-radius: 40px;
+            font-weight: bold;
+            font-size: 12px;
+            cursor: pointer;
+            border: none;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+            backdrop-filter: blur(4px);
+            transition: 0.2s;
+            text-align: center;
+            white-space: nowrap;
+        }
+        .btn-ui:hover { transform: scale(1.02); background: #2c2c44; }
+        .btn-upload { background: #2a6f3f; }
+        .btn-backmap { background: #3a4a8c; }
+        .btn-place { background: #b4561c; }
+        .btn-switchmap { background: #7c5e2a; }
+        .btn-centamap { background: #3b7a5e; }
+
+        /* 高亮扇區：去掉過粗邊框和陰影 */
+        .hit-box { stroke: #f55 !important; stroke-width: 2.5px !important; stroke-opacity: 0.9 !important; filter: none !important; }
+
+        .toast-msg {
+            position: fixed; bottom: 100px; left: 20px;
+            background: #000000aa; backdrop-filter: blur(8px);
+            color: #ffefb9; padding: 6px 14px;
+            border-radius: 40px;
+            font-size: 12px; z-index: 3000; pointer-events: none;
+            font-weight: 500;
+        }
+    </style>
+</head>
+<body>
+
+<div id="search-box">
+    <input type="text" id="search-input" placeholder="搜尋位置 (地圖模式)">
+    <button id="search-btn">搜尋</button>
+</div>
+
+<div class="bottom-btns">
+    <button id="add-btn" class="btn-ui btn-place">🧭 放置羅庚</button>
+    <button id="upload-img-btn" class="btn-ui btn-upload">📁 上載圖檔</button>
+    <button id="back-to-map-btn" class="btn-ui btn-backmap">🗺️ 返回地圖</button>
+    <button id="toggle-map-btn" class="btn-ui btn-switchmap">🔄 切換底圖</button>
+    <button id="open-centamap-btn" class="btn-ui btn-centamap">🗺️ 中原地圖</button>
+</div>
+
+<div id="map"></div>
+
+<div id="fs-tool">
+    <div id="red-cross">
+        <div class="cross-line v-line">
+            <div class="naqi-label">納氣</div>   <!-- 獨立標籤 -->
+        </div>
+        <div class="cross-line h-line"></div>
+    </div>
+    <svg id="chinese-compass" viewBox="0 0 240 240">
+        <g id="grid-96"></g>
+        <g id="markings"></g>
+    </svg>
+    <div id="arc-container">
+        <div id="direction-info">
+            <span>九運羅盤</span> · 納氣向首: <strong id="cur-mtn">子</strong> (<span id="angle-val">0</span>°)
+        </div>
+        <input type="range" id="rotate-slider" class="arc-slider" min="-180" max="180" value="0" step="0.1">
+    </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+    // ======================= 多地圖底圖 (防灰屏) =======================
+    const MAP_TYPES = [
+        { name: "普通地圖", url: "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png", options: { maxZoom: 22, attribution: '&copy; OSM & CartoDB' } },
+        { name: "衛星影像", url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", options: { maxZoom: 19, attribution: '&copy; Esri' } },
+        { name: "政府地圖", url: "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", options: { maxZoom: 19, attribution: '&copy; OpenStreetMap' } }
+    ];
+    
+    let currentMapIndex = 0;
+    let currentTileLayer = null;
+    let currentImageOverlay = null;
+    let isImageMode = false;
+    
+    const map = L.map('map', { zoomControl: false, maxZoom: 22 }).setView([22.2850, 114.1722], 18);
+    L.control.zoom({ position: 'bottomright' }).addTo(map);
+    
+    function switchBaseLayer(newIndex, skipToast = false) {
+        const newLayerDef = MAP_TYPES[newIndex];
+        if (!newLayerDef) return;
+        if (isImageMode) {
+            if (currentImageOverlay) map.removeLayer(currentImageOverlay);
+            isImageMode = false;
+        }
+        if (currentTileLayer && map.hasLayer(currentTileLayer)) map.removeLayer(currentTileLayer);
+        const newLayer = L.tileLayer(newLayerDef.url, newLayerDef.options);
+        newLayer.addTo(map);
+        currentTileLayer = newLayer;
+        map.options.maxZoom = newLayerDef.options.maxZoom;
+        if (map.getZoom() > newLayerDef.options.maxZoom) map.setZoom(newLayerDef.options.maxZoom);
+        currentMapIndex = newIndex;
+        if (!skipToast) showToast(`🗺️ 已切換至 ${newLayerDef.name} (最大縮放 ${newLayerDef.options.maxZoom} 級)`, 1800);
+        const toggleBtn = document.getElementById('toggle-map-btn');
+        if (toggleBtn) toggleBtn.innerHTML = `🔄 切換底圖｜${MAP_TYPES[(currentMapIndex + 1) % MAP_TYPES.length].name}`;
+        if (window.activeLatLng && document.getElementById('fs-tool').style.display === 'block') setTimeout(() => updateToolPosition(), 30);
+    }
+    
+    function restoreMapMode() {
+        if (!isImageMode && currentTileLayer && map.hasLayer(currentTileLayer)) return;
+        if (currentImageOverlay) { map.removeLayer(currentImageOverlay); currentImageOverlay = null; }
+        isImageMode = false;
+        if (currentTileLayer && !map.hasLayer(currentTileLayer)) currentTileLayer.addTo(map);
+        else if (!currentTileLayer) { const def = MAP_TYPES[0]; currentTileLayer = L.tileLayer(def.url, def.options).addTo(map); currentMapIndex = 0; }
+        const targetMaxZoom = MAP_TYPES[currentMapIndex].options.maxZoom;
+        map.options.maxZoom = targetMaxZoom;
+        if (map.getZoom() > targetMaxZoom) map.setZoom(targetMaxZoom);
+        showToast("🌍 已返回標準地圖模式", 1600);
+    }
+    
+    function showToast(text, duration = 2000) {
+        const toast = document.createElement('div');
+        toast.className = 'toast-msg';
+        toast.innerText = text;
+        document.body.appendChild(toast);
+        setTimeout(() => toast.remove(), duration);
+    }
+    
+    (function initDefaultLayer() {
+        const def = MAP_TYPES[0];
+        currentTileLayer = L.tileLayer(def.url, def.options).addTo(map);
+        currentMapIndex = 0;
+        map.options.maxZoom = def.options.maxZoom;
+        if (map.getZoom() > def.options.maxZoom) map.setZoom(def.options.maxZoom);
+        document.getElementById('toggle-map-btn').innerHTML = `🔄 切換底圖｜${MAP_TYPES[1].name}`;
+    })();
+    
+    document.getElementById('toggle-map-btn').onclick = () => {
+        if (isImageMode) restoreMapMode();
+        switchBaseLayer((currentMapIndex + 1) % MAP_TYPES.length);
+    };
+    
+    document.getElementById('open-centamap-btn').onclick = () => {
+        window.open('http://hk.centamap.com/gc/home.aspx', '_blank');
+        showToast("已開啟中原地圖首頁", 1500);
+    };
+    
+    // ======================= 羅盤核心 (納氣 / 二十四山 / 96扇區 + 小號半透底色) =======================
+    const tool = document.getElementById('fs-tool');
+    const slider = document.getElementById('rotate-slider');
+    const boxElements = [];
+    const mtns = ["子","癸","丑","艮","寅","甲","卯","乙","辰","巽","巳","丙","午","丁","未","坤","申","庚","酉","辛","戌","乾","亥","壬"];
+    
+    function getMountainFromAngle(angleDeg) {
+        let deg = (angleDeg + 360) % 360;
+        let idx = Math.floor(((deg + 7.5) % 360) / 15);
+        return mtns[idx % 24];
+    }
+    
+    function updateCompassAndDirection(val) {
+        document.getElementById('angle-val').innerText = val;
+        document.getElementById('red-cross').style.transform = `translate(-50%, -50%) rotate(${val}deg)`;
+        let deg = (parseFloat(val) + 360) % 360;
+        document.getElementById('cur-mtn').innerText = getMountainFromAngle(deg);
+        boxElements.forEach(el => el.classList.remove('hit-box'));
+        [0, 90, 180, 270].forEach(offset => {
+            let n = (parseFloat(val) + offset + 360) % 360;
+            if (n > 352.5) n -= 360;
+            const hit = boxElements.find(el => n >= parseFloat(el.dataset.min) && n < parseFloat(el.dataset.max));
+            if (hit) hit.classList.add('hit-box');
+        });
+    }
+    
+    slider.oninput = (e) => updateCompassAndDirection(e.target.value);
+    
+    const gridSvg = document.getElementById('grid-96');
+    const markingsSvg = document.getElementById('markings');
+    gridSvg.innerHTML = '';
+    markingsSvg.innerHTML = '';
+    
+    for(let i = 0; i < 96; i++) {
+        let startDeg = i * 3.75 - 7.5, endDeg = (i+1) * 3.75 - 7.5;
+        let rad1 = (startDeg - 90) * Math.PI/180, rad2 = (endDeg - 90) * Math.PI/180;
+        let rOuter = 118, rInner = 108;
+        let x1 = 120 + rInner*Math.cos(rad1), y1 = 120 + rInner*Math.sin(rad1);
+        let x2 = 120 + rOuter*Math.cos(rad1), y2 = 120 + rOuter*Math.sin(rad1);
+        let x3 = 120 + rOuter*Math.cos(rad2), y3 = 120 + rOuter*Math.sin(rad2);
+        let x4 = 120 + rInner*Math.cos(rad2), y4 = 120 + rInner*Math.sin(rad2);
+        let d = `M ${x1} ${y1} L ${x2} ${y2} A ${rOuter} ${rOuter} 0 0 1 ${x3} ${y3} L ${x4} ${y4} A ${rInner} ${rInner} 0 0 0 ${x1} ${y1} Z`;
+        let path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+        path.setAttribute("d", d);
+        path.setAttribute("fill", (i % 4 === 1 || i % 4 === 2) ? "rgba(80,70,60,0.3)" : "rgba(230,220,200,0.45)");
+        path.setAttribute("stroke", "#4a3e2c");
+        path.setAttribute("stroke-width", "0.5");
+        path.dataset.min = startDeg; path.dataset.max = endDeg;
+        gridSvg.appendChild(path);
+        boxElements.push(path);
+    }
+    
+    // 二十四山文字 + 半透底色（小尺寸）
+    mtns.forEach((name, idx) => {
+        let angle = idx * 15;
+        let rad = (angle - 90) * Math.PI/180;
+        let radius = 92;
+        let x = 120 + radius * Math.cos(rad);
+        let y = 120 + radius * Math.sin(rad);
+        
+        const rectW = 20, rectH = 14;
+        const rectX = x - rectW/2;
+        const rectY = y - rectH/2;
+        
+        let rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+        rect.setAttribute("x", rectX);
+        rect.setAttribute("y", rectY);
+        rect.setAttribute("width", rectW);
+        rect.setAttribute("height", rectH);
+        rect.setAttribute("rx", "4");
+        rect.setAttribute("ry", "4");
+        rect.setAttribute("fill", "rgba(255, 255, 220, 0.65)");
+        rect.setAttribute("stroke", "none");
+        rect.setAttribute("transform", `rotate(${angle}, ${x}, ${y})`);
+        markingsSvg.appendChild(rect);
+        
+        let text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+        text.setAttribute("x", x);
+        text.setAttribute("y", y);
+        text.setAttribute("fill", (idx % 3 === 0) ? "#b22222" : "#2c2c2c");
+        text.setAttribute("font-size", "11");
+        text.setAttribute("font-weight", (idx % 3 === 0) ? "bold" : "normal");
+        text.setAttribute("transform", `rotate(${angle}, ${x}, ${y})`);
+        text.setAttribute("text-anchor", "middle");
+        text.setAttribute("dominant-baseline", "middle");
+        text.textContent = name;
+        markingsSvg.appendChild(text);
+    });
+    updateCompassAndDirection(0);
+    
+    // ======================= 放置羅庚 & 返回移除 =======================
+    let isPlacing = false;
+    let activeLatLng = null;
+    window.activeLatLng = activeLatLng;
+    const addBtn = document.getElementById('add-btn');
+    
+    function updateToolPosition() {
+        if(!activeLatLng) return;
+        let containerPoint = map.latLngToContainerPoint(activeLatLng);
+        tool.style.left = containerPoint.x + 'px';
+        tool.style.top = containerPoint.y + 'px';
+    }
+    
+    function removeCompass() {
+        if (tool.style.display === 'block') {
+            tool.style.display = 'none';
+            tool.classList.remove('locked');
+            document.getElementById('arc-container').style.display = 'none';
+        }
+        isPlacing = false;
+        activeLatLng = null;
+        window.activeLatLng = null;
+        addBtn.innerHTML = '🧭 放置羅庚';
+        addBtn.classList.remove('btn-backmap');
+        addBtn.classList.add('btn-place');
+    }
+    
+    function startPlaceCompass() {
+        if (tool.style.display === 'block') removeCompass();
+        tool.classList.remove('locked');
+        isPlacing = true;
+        activeLatLng = map.getCenter();
+        window.activeLatLng = activeLatLng;
+        tool.style.display = 'block';
+        document.getElementById('arc-container').style.display = 'none';
+        updateToolPosition();
+        showToast("拖曳地圖或點擊位置以鎖定羅庚", 1800);
+    }
+    
+    addBtn.onclick = () => {
+        if (tool.style.display === 'block' && tool.classList.contains('locked')) {
+            removeCompass();
+            showToast("羅庚已移除", 1200);
+        } else if (tool.style.display === 'block' && isPlacing) {
+            removeCompass();
+            showToast("已取消放置羅庚", 1200);
+        } else {
+            startPlaceCompass();
+        }
+    };
+    
+    map.on('mousemove', (e) => { if(isPlacing) { activeLatLng = e.latlng; window.activeLatLng = activeLatLng; updateToolPosition(); } });
+    map.on('touchmove', (e) => { if(isPlacing && e.latlng) { activeLatLng = e.latlng; window.activeLatLng = activeLatLng; updateToolPosition(); } });
+    map.on('click', (e) => {
+        if(isPlacing) {
+            isPlacing = false;
+            activeLatLng = e.latlng;
+            window.activeLatLng = activeLatLng;
+            tool.classList.add('locked');
+            document.getElementById('arc-container').style.display = 'block';
+            updateToolPosition();
+            updateCompassAndDirection(slider.value);
+            addBtn.innerHTML = '🔙 返回';
+            addBtn.classList.remove('btn-place');
+            addBtn.classList.add('btn-backmap');
+            showToast("羅庚已鎖定，拖曳滑桿調整納氣方位 | 點擊「返回」可移除羅庚", 2500);
+        }
+    });
+    map.on('move zoom', () => { if(tool.style.display === 'block' && activeLatLng) updateToolPosition(); });
+    
+    // ======================= 圖片底圖 (保持比例) =======================
+    const fileInput = document.createElement('input');
+    fileInput.type = 'file';
+    fileInput.accept = 'image/jpeg,image/png,image/webp,image/jpg';
+    fileInput.style.display = 'none';
+    document.body.appendChild(fileInput);
+    
+    function loadProportionalImageAsBaseLayer(imageUrl, imgWidth, imgHeight) {
+        if (isImageMode && currentImageOverlay) map.removeLayer(currentImageOverlay);
+        if (currentTileLayer && map.hasLayer(currentTileLayer)) map.removeLayer(currentTileLayer);
+        if (currentImageOverlay) map.removeLayer(currentImageOverlay);
+        const center = map.getCenter();
+        const bounds = map.getBounds();
+        const lngSpan = bounds.getEast() - bounds.getWest();
+        const latSpan = bounds.getNorth() - bounds.getSouth();
+        const imgRatio = imgWidth / imgHeight;
+        const viewRatio = lngSpan / latSpan;
+        let finalWest, finalEast, finalSouth, finalNorth;
+        if (imgRatio > viewRatio) {
+            const targetLngSpan = lngSpan;
+            const targetLatSpan = targetLngSpan / imgRatio;
+            finalWest = center.lng - targetLngSpan/2; finalEast = center.lng + targetLngSpan/2;
+            finalSouth = center.lat - targetLatSpan/2; finalNorth = center.lat + targetLatSpan/2;
+        } else {
+            const targetLatSpan = latSpan;
+            const targetLngSpan = targetLatSpan * imgRatio;
+            finalWest = center.lng - targetLngSpan/2; finalEast = center.lng + targetLngSpan/2;
+            finalSouth = center.lat - targetLatSpan/2; finalNorth = center.lat + targetLatSpan/2;
+        }
+        const imageBounds = [[finalSouth, finalWest], [finalNorth, finalEast]];
+        const imgOverlay = L.imageOverlay(imageUrl, imageBounds, { opacity: 1, interactive: false, zIndex: 0 }).addTo(map);
+        currentImageOverlay = imgOverlay;
+        isImageMode = true;
+        map.options.maxZoom = 24;
+        if (activeLatLng) updateToolPosition();
+        showToast("✓ 圖片底圖載入完成 (保持比例，可無限放大)", 2800);
+    }
+    
+    function handleUpload(file) {
+        if (!file) return;
+        const url = URL.createObjectURL(file);
+        const imgElement = new Image();
+        imgElement.onload = () => { loadProportionalImageAsBaseLayer(url, imgElement.width, imgElement.height); URL.revokeObjectURL(url); };
+        imgElement.onerror = () => { alert("圖片載入失敗"); URL.revokeObjectURL(url); };
+        imgElement.src = url;
+    }
+    
+    document.getElementById('upload-img-btn').onclick = () => fileInput.click();
+    fileInput.onchange = (event) => { if(event.target.files[0]) handleUpload(event.target.files[0]); fileInput.value = ''; };
+    
+    document.getElementById('back-to-map-btn').onclick = () => {
+        restoreMapMode();
+        if (activeLatLng && tool.style.display === 'block') updateToolPosition();
+    };
+    
+    // ======================= 搜尋功能 =======================
+    document.getElementById('search-btn').onclick = async () => {
+        const query = document.getElementById('search-input').value.trim();
+        if (!query) return;
+        try {
+            const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query + ", Hong Kong")}&limit=1`;
+            const res = await fetch(url);
+            const data = await res.json();
+            if (data && data.length > 0) map.setView([parseFloat(data[0].lat), parseFloat(data[0].lon)], 19);
+            else alert("找不到地點");
+        } catch(e) { console.warn(e); }
+    };
+    
+    window.addEventListener('load', () => {
+        updateCompassAndDirection(slider.value);
+        tool.style.display = 'none';
+        showToast("韻韻羅庚 | 納氣標籤已修復，紅線無發光", 2800);
+    });
+</script>
+</body>
+</html>
